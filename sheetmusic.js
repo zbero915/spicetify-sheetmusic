@@ -535,6 +535,7 @@ async function smGrid(uri) {
   const ICON_SYNC = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>';
   const ICON_MOON = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>';
   const ICON_NEXT = '<svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 5.6 6.2L4 8M4 4v4h4M4 13a8 8 0 0 0 14.4 4.8L20 16M20 20v-4h-4"/></svg>';
+  const ICON_FOLLOW = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>';
   const ICON_CLOSE = '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
   const readJSON = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
@@ -837,6 +838,7 @@ async function smGrid(uri) {
         <div><div class="sm-title"></div><div class="sm-sub"></div><div class="sm-status"></div></div>
         <div class="sm-actions">
           <button class="sm-icon" data-a="sync" title="Sync highlight: click then choose the bar playing now" hidden>${ICON_SYNC}</button>
+          <button class="sm-icon" data-a="follow" title="Auto-scroll & highlight">${ICON_FOLLOW}</button>
           <button class="sm-icon" data-a="next" title="Try another score" hidden>${ICON_NEXT}</button>
           <button class="sm-icon" data-a="night" title="Night mode">${ICON_MOON}</button>
           <button class="sm-icon" data-a="dl" title="Download sheet music" disabled>${ICON_DL}</button>
@@ -854,10 +856,13 @@ async function smGrid(uri) {
     S.pagesEl = ov.querySelector(".sm-pages");
     S.nextBtn = ov.querySelector('[data-a="next"]');
     S.syncBtn = ov.querySelector('[data-a="sync"]');
+    S.followBtn = ov.querySelector('[data-a="follow"]');
     S.dlBtn = ov.querySelector('[data-a="dl"]');
     S.nightBtn = ov.querySelector('[data-a="night"]');
     S.night = readJSON("sm:night") === true;
+    S.follow = readJSON("sm:follow") !== false;
     applyNight();
+    applyFollow();
     S.hl = document.createElement("div");
     S.hl.className = "sm-hl";
 
@@ -887,6 +892,16 @@ async function smGrid(uri) {
       if (b.dataset.a === "night") { S.night = !S.night; writeJSON("sm:night", S.night); applyNight(); }
       if (b.dataset.a === "next") nextScore();
       if (b.dataset.a === "sync") { S.syncMode = !S.syncMode; paint(); }
+      if (b.dataset.a === "follow") {
+        S.follow = !S.follow;
+        if (!S.follow) S.syncMode = false;
+        writeJSON("sm:follow", S.follow);
+        applyFollow();
+        S.lastKey = "";
+        S.instant = true;
+        paint();
+        place();
+      }
       if (b.dataset.a === "close") close();
     });
     ["wheel", "touchmove", "pointerdown"].forEach((ev) => S.scroller.addEventListener(ev, () => (S.lastScroll = Date.now()), { passive: true }));
@@ -925,6 +940,11 @@ async function smGrid(uri) {
     S.el.classList.toggle("sm-night", !!S.night);
     S.nightBtn.classList.toggle("on", !!S.night);
     S.nightBtn.title = S.night ? "Night mode: on (click for white pages)" : "Night mode: off (click for dark pages)";
+  }
+  function applyFollow() {
+    if (!S.followBtn) return;
+    S.followBtn.classList.toggle("on", !!S.follow);
+    S.followBtn.title = S.follow ? "Auto-scroll & highlight: on (click to turn off)" : "Auto-scroll & highlight: off (click to turn on)";
   }
   function layout() {
     if (!S.el) return;
@@ -970,11 +990,11 @@ async function smGrid(uri) {
     if (S.pagesDoc !== doc) mountPages(j);
     let status = "";
     if (!t) status = "";
-    else if (j && j.state === "ready") status = (j.bars.length ? [j.note, j.cal && j.cal.length ? "Highlight adjusted (Alt+click any bar to reset)" : j.grid ? "Synced to recording" : "Estimated tempo - if highlight drifts, click clock icon and choose the bar playing (or Shift+click)"].filter(Boolean).join(" - ") : "Could not find the bars in this score");
+    else if (j && j.state === "ready") status = !S.follow ? [j.note, "Auto-scroll & highlight off"].filter(Boolean).join(" - ") : (j.bars.length ? [j.note, j.cal && j.cal.length ? "Highlight adjusted (Alt+click any bar to reset)" : j.grid ? "Synced to recording" : "Estimated tempo - if highlight drifts, click clock icon and choose the bar playing (or Shift+click)"].filter(Boolean).join(" - ") : "Could not find the bars in this score");
     else if (j) status = MESSAGES[j.state] || "";
-    if (S.syncMode && j && j.state === "ready") status = "Choose the bar that is playing right now to sync highlight";
+    if (S.syncMode && S.follow && j && j.state === "ready") status = "Choose the bar that is playing right now to sync highlight";
     S.statusEl.textContent = doc ? status : "";
-    S.syncBtn.hidden = !(j && j.state === "ready" && j.bars.length);
+    S.syncBtn.hidden = !(S.follow && j && j.state === "ready" && j.bars.length);
     S.syncBtn.style.background = S.syncMode ? "rgba(255,255,255,.35)" : "";
     S.msgEl.textContent = doc ? "" : !t ? "Play a song to see its sheet music." : j ? MESSAGES[j.state] || "" : MESSAGES.searching;
     S.nextBtn.hidden = !(j && j.cands.length > 1);
@@ -983,7 +1003,7 @@ async function smGrid(uri) {
 
   function place() {
     const j = S.shown;
-    if (!j || j.state !== "ready" || !j.bars.length || S.pagesDoc !== j.doc) { S.hl.remove(); return; }
+    if (!S.follow || !j || j.state !== "ready" || !j.bars.length || S.pagesDoc !== j.doc) { S.hl.remove(); return; }
     const q = posAt(j, Spicetify.Player.getProgress());
     const wrap = S.pageEls[q.bar.p];
     if (!wrap) return;

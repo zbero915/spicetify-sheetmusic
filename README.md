@@ -32,7 +32,7 @@ What this does automatically:
 - **Click any bar**: Jump Spotify playback to that bar.
 - **Clock button (or `Shift+click` a bar)**: Choose the bar playing right now to fix drift.
 - **`Alt+click` a bar**: Reset manual sync adjustments for the current track.
-- **Top-right icons**: Sync bar, Try another score, Night mode, Download PDF, Close.
+- **Top-right icons**: Sync bar, Auto-scroll & highlight toggle, Try another score, Night mode, Download PDF, Close.
 
 ## Update (Windows PowerShell)
 
