@@ -24,4 +24,14 @@ What this does automatically:
 - **Click any bar**: Jump Spotify playback to that bar.
 - **Clock button (or `Shift+click` a bar)**: Choose the bar playing right now to fix drift.
 - **`Alt+click` a bar**: Reset manual sync adjustments for the current track.
-- **Top-right icons**: Sync bar, Try another score, Night mode, Download PDF.
+- **Top-right icons**: Sync bar, Try another score, Night mode, Download PDF, Close.
+
+## Uninstall (Windows PowerShell)
+
+Run this command in **PowerShell** (not as Administrator):
+
+```powershell
+irm https://raw.githubusercontent.com/zbero915/spicetify-sheetmusic/main/uninstall.ps1 | iex
+```
+
+It asks whether to remove **Spicetify** completely (`Y` restores Spotify without touching your app or login, removes the Desktop shortcut, deletes Spicetify folders, and cleans `PATH`) or keep Spicetify and remove only the **Sheet Music** extension (`N`).
