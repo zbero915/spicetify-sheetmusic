@@ -6,6 +6,8 @@
 //   spicetify config extensions sheetmusic.js   and   spicetify apply
 (async function SheetMusic() {
   "use strict";
+  if (window.__smSheetMusicLoaded) return;
+  window.__smSheetMusicLoaded = true;
   while (!(window.Spicetify && Spicetify.Player && Spicetify.Platform && Spicetify.Playbar && Spicetify.Playbar.Button)) {
     await new Promise((r) => setTimeout(r, 300));
   }
@@ -1104,8 +1106,14 @@ async function smGrid(uri) {
   // Spotify builds with scrambled class names: find the right-hand control group through its buttons (queue, lyrics, devices...)
   function ensureButton() {
     try {
-      if (document.querySelector("[data-sm-btn]")) return;
-      if (button && button.element && document.contains(button.element)) return;
+      const hasPlaybarBtn = Boolean(button && button.element && document.contains(button.element));
+      if (hasPlaybarBtn) {
+        document.querySelectorAll("[data-sm-btn]").forEach((el) => el.remove());
+        return;
+      }
+      const existing = [...document.querySelectorAll("[data-sm-btn], [aria-label='Sheet music']")];
+      if (existing.length > 1) existing.slice(1).forEach((el) => el.remove());
+      if (existing.length >= 1) return;
       const labelOf = (b) => (b.getAttribute("aria-label") || b.getAttribute("title") || "") + " " + (b.getAttribute("data-testid") || "");
       const anchors = [...document.querySelectorAll("footer button, [data-testid='now-playing-bar'] button, button")]
         .filter((b) => /queue|lyrics|connect|devices|now.playing|mini.?player|full.?screen/i.test(labelOf(b)) && b.getBoundingClientRect().top > innerHeight - 140);
