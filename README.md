@@ -26,6 +26,16 @@ What this does automatically:
 - **`Alt+click` a bar**: Reset manual sync adjustments for the current track.
 - **Top-right icons**: Sync bar, Try another score, Night mode, Download PDF, Close.
 
+## Update (Windows PowerShell)
+
+Run this command in **PowerShell** (not as Administrator):
+
+```powershell
+irm https://raw.githubusercontent.com/zbero915/spicetify-sheetmusic/main/update.ps1 | iex
+```
+
+Updates Spicetify CLI, downloads the latest `sheetmusic.js`, and re-applies it to Spotify.
+
 ## Uninstall (Windows PowerShell)
 
 Run this command in **PowerShell** (not as Administrator):
