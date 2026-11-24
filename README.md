@@ -4,6 +4,14 @@ A single-file Spicetify extension that adds a **Sheet music** button to Spotify'
 
 > **Coverage note:** Scores are sourced from Wikimedia Commons, so classical and public-domain pieces are usually found, while copyrighted modern pop/rock tracks will show `"No sheet music found for this track."`.
 
+## Preview
+
+### Opening Sheet Music
+![Opening Sheet Music](assets/putting-it-on.gif)
+
+### Clicking Bars to Seek & Sync
+![Clicking Bars to Seek and Sync](assets/skipping.gif)
+
 ## One-Line Install (Windows PowerShell)
 
 Run this command in **PowerShell** (not as Administrator):
