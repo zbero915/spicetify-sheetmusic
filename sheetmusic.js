@@ -533,6 +533,7 @@ async function smGrid(uri) {
   const ICON_SYNC = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>';
   const ICON_MOON = '<svg viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5z"/></svg>';
   const ICON_NEXT = '<svg viewBox="0 0 24 24"><path d="M20 11A8 8 0 0 0 5.6 6.2L4 8M4 4v4h4M4 13a8 8 0 0 0 14.4 4.8L20 16M20 20v-4h-4"/></svg>';
+  const ICON_CLOSE = '<svg viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
   const readJSON = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
   const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -837,6 +838,7 @@ async function smGrid(uri) {
           <button class="sm-icon" data-a="next" title="Try another score" hidden>${ICON_NEXT}</button>
           <button class="sm-icon" data-a="night" title="Night mode">${ICON_MOON}</button>
           <button class="sm-icon" data-a="dl" title="Download sheet music" disabled>${ICON_DL}</button>
+          <button class="sm-icon" data-a="close" title="Close">${ICON_CLOSE}</button>
         </div>
       </div>
       <div class="sm-scroll"><div class="sm-pages"></div><div class="sm-msg"></div></div>`;
@@ -883,6 +885,7 @@ async function smGrid(uri) {
       if (b.dataset.a === "night") { S.night = !S.night; writeJSON("sm:night", S.night); applyNight(); }
       if (b.dataset.a === "next") nextScore();
       if (b.dataset.a === "sync") { S.syncMode = !S.syncMode; paint(); }
+      if (b.dataset.a === "close") close();
     });
     ["wheel", "touchmove", "pointerdown"].forEach((ev) => S.scroller.addEventListener(ev, () => (S.lastScroll = Date.now()), { passive: true }));
     // like clicking a lyric line: jump the song to that bar

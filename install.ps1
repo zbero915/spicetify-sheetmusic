@@ -17,6 +17,13 @@ if ($PSVersionTable.PSVersion -lt [version]'5.1') {
   throw "PowerShell 5.1 or higher is required (current: $($PSVersionTable.PSVersion))."
 }
 
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+  [Security.Principal.WindowsBuiltInRole]::Administrator
+)
+if ($isAdmin) {
+  throw 'Please run this installer from a normal (non-Administrator) PowerShell window.'
+}
+
 # 1. Migrate legacy spicetify-cli folder if present
 if ((Test-Path -LiteralPath $OldSpicetifyDir) -and -not (Test-Path -LiteralPath $SpicetifyExe)) {
   Write-Step 'Migrating legacy spicetify-cli folder...'

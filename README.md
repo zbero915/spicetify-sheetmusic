@@ -2,6 +2,8 @@
 
 A single-file Spicetify extension that adds a **Sheet music** button to Spotify's player bar, fetches matching public-domain scores from Wikimedia Commons, detects staves and bars, and highlights the current bar during playback.
 
+> **Coverage note:** Scores are sourced from Wikimedia Commons, so classical and public-domain pieces are usually found, while copyrighted modern pop/rock tracks will show `"No sheet music found for this track."`.
+
 ## One-Line Install (Windows PowerShell)
 
 Run this command in **PowerShell** (not as Administrator):
