@@ -6,6 +6,33 @@
 //   spicetify config extensions sheetmusic.js   and   spicetify apply
 (async function SheetMusic() {
   "use strict";
+  const SM_VERSION = "1.2.0";
+  const SM_RAW_URL = "https://raw.githubusercontent.com/zbero915/spicetify-sheetmusic/main/sheetmusic.js";
+  const smCmpVer = (a, b) => {
+    const pa = String(a || "0").split(".").map((n) => parseInt(n, 10) || 0);
+    const pb = String(b || "0").split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+    }
+    return 0;
+  };
+  try {
+    const cv = localStorage.getItem("sm:cachedVer"), cc = localStorage.getItem("sm:cachedCode");
+    if (cv && cc) {
+      if (smCmpVer(cv, SM_VERSION) > 0 && !window.__smBootedCache) {
+        window.__smBootedCache = true;
+        const s = document.createElement("script");
+        s.src = URL.createObjectURL(new Blob([cc], { type: "text/javascript" }));
+        s.onerror = () => { try { localStorage.removeItem("sm:cachedVer"); localStorage.removeItem("sm:cachedCode"); } catch (e) {} };
+        document.head.appendChild(s);
+        return;
+      }
+      if (smCmpVer(cv, SM_VERSION) <= 0) {
+        localStorage.removeItem("sm:cachedVer");
+        localStorage.removeItem("sm:cachedCode");
+      }
+    }
+  } catch (e) {}
   if (window.__smSheetMusicLoaded) return;
   window.__smSheetMusicLoaded = true;
   while (!(window.Spicetify && Spicetify.Player && Spicetify.Platform && Spicetify.Playbar && Spicetify.Playbar.Button)) {
@@ -529,6 +556,11 @@ async function smGrid(uri) {
 .sm-night .sm-page canvas{filter:invert(.9) hue-rotate(180deg)}
 .sm-night .sm-hl{--sm-cur:var(--sm-curn,#5ef28d);opacity:.25}
 .sm-msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-size:18px;opacity:.75;padding:0 40px;pointer-events:none}
+.sm-upd{position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 24px 8px;padding:10px 14px;border-radius:8px;background:rgba(29,185,84,.18);border:1px solid rgba(29,185,84,.45);font-size:13px}
+.sm-upd-btns{display:flex;gap:8px;flex-shrink:0}
+.sm-upd-btn{border:0;border-radius:16px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;background:rgba(255,255,255,.15);color:#fff}
+.sm-upd-btn.pri{background:#1db954;color:#000}
+.sm-upd-btn:hover{filter:brightness(1.1)}
 `;
   const ICON_BTN = '<svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 2v7.3A2.5 2.5 0 1 0 7.5 11.5V4.8L12 3.9v4.4a2.5 2.5 0 1 0 1.5 2.3V1.5L6 2z"/></svg>';
   const ICON_DL = '<svg viewBox="0 0 24 24"><path d="M12 3v11M7.5 10 12 14.5 16.5 10M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>';
@@ -729,7 +761,7 @@ async function smGrid(uri) {
   }
 
   // ---- one job per track: find, stream into memory, read bars, build the time map ----
-  const S = { open: false, track: null, shown: null, jobs: new Map(), colors: new Map(), pagesDoc: null, pageEls: [], lastKey: "", lastScroll: 0, instant: true, raf: 0 };
+  const S = { open: false, track: null, shown: null, jobs: new Map(), colors: new Map(), pagesDoc: null, pageEls: [], lastKey: "", lastScroll: 0, instant: true, raf: 0, updateChecked: false, updateInfo: null };
   const touch = (j) => { if (S.shown === j && S.el) paint(); };
 
   function currentTrack() {
@@ -829,6 +861,7 @@ async function smGrid(uri) {
     const style = document.createElement("style");
     style.textContent = CSS;
     document.head.appendChild(style);
+    S.styleEl = style;
     const ov = document.createElement("div");
     ov.className = "sm-ov";
     ov.hidden = true;
@@ -845,9 +878,12 @@ async function smGrid(uri) {
           <button class="sm-icon" data-a="close" title="Close">${ICON_CLOSE}</button>
         </div>
       </div>
+      <div class="sm-upd" hidden><span class="sm-upd-txt"></span><div class="sm-upd-btns"><button class="sm-upd-btn pri" data-a="upd-yes">Update</button><button class="sm-upd-btn" data-a="upd-no">Not now</button></div></div>
       <div class="sm-scroll"><div class="sm-pages"></div><div class="sm-msg"></div></div>`;
     document.body.appendChild(ov);
     S.el = ov;
+    S.updEl = ov.querySelector(".sm-upd");
+    S.updTxt = ov.querySelector(".sm-upd-txt");
     S.titleEl = ov.querySelector(".sm-title");
     S.subEl = ov.querySelector(".sm-sub");
     S.statusEl = ov.querySelector(".sm-status");
@@ -902,6 +938,8 @@ async function smGrid(uri) {
         paint();
         place();
       }
+      if (b.dataset.a === "upd-no") { S.updateInfo = null; if (S.updEl) S.updEl.hidden = true; }
+      if (b.dataset.a === "upd-yes") applySelfUpdate();
       if (b.dataset.a === "close") close();
     });
     ["wheel", "touchmove", "pointerdown"].forEach((ev) => S.scroller.addEventListener(ev, () => (S.lastScroll = Date.now()), { passive: true }));
@@ -932,7 +970,7 @@ async function smGrid(uri) {
       }
       Spicetify.Player.seek(Math.round(j.anchors[best].t));
     });
-    window.addEventListener("resize", layout);
+    window.addEventListener("resize", layout, sig ? { signal: sig } : undefined);
   }
 
   function applyNight() {
@@ -1058,10 +1096,53 @@ async function smGrid(uri) {
   }
 
   // ---- open / close / track changes ----
-  let button;
+  const ac = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const sig = ac ? ac.signal : undefined;
+  let button, iv1, iv2;
+  async function checkForUpdate() {
+    try {
+      const r = await fetch(SM_RAW_URL, { cache: "no-store" });
+      if (!r.ok) return;
+      const code = await r.text();
+      const m = /const\s+SM_VERSION\s*=\s*["']([^"']+)["']/.exec(code);
+      if (!m || smCmpVer(m[1], SM_VERSION) <= 0) return;
+      S.updateInfo = { version: m[1], code };
+      if (S.updEl && S.updTxt) {
+        S.updTxt.textContent = "Update available: v" + SM_VERSION + " -> v" + m[1];
+        S.updEl.hidden = false;
+      }
+    } catch (e) {}
+  }
+  function teardown() {
+    S.open = false;
+    if (S.raf) cancelAnimationFrame(S.raf);
+    clearInterval(iv1); clearInterval(iv2);
+    if (ac) ac.abort();
+    if (S.io) S.io.disconnect();
+    if (S.el) S.el.remove();
+    if (S.styleEl) S.styleEl.remove();
+    if (button && button.deregister) try { button.deregister(); } catch (e) {}
+    document.querySelectorAll("[data-sm-btn], [aria-label='Sheet music']").forEach((el) => el.remove());
+    window.__smSheetMusicLoaded = false;
+  }
+  function applySelfUpdate() {
+    const info = S.updateInfo;
+    if (!info) return;
+    try {
+      localStorage.setItem("sm:cachedVer", info.version);
+      localStorage.setItem("sm:cachedCode", info.code);
+    } catch (e) {}
+    teardown();
+    window.__smBootedCache = true;
+    window.__smAutoOpenAfterUpdate = true;
+    const s = document.createElement("script");
+    s.src = URL.createObjectURL(new Blob([info.code], { type: "text/javascript" }));
+    document.head.appendChild(s);
+  }
   function open() {
     if (!S.el) buildUI();
     S.open = true;
+    if (!S.updateChecked) { S.updateChecked = true; checkForUpdate(); }
     try { localStorage.setItem("sm:used", "1"); } catch (e) {} // from now on scores are prepared in the background, so they are ready when you press
     S.track = currentTrack();
     S.shown = S.track ? ensureJob(S.track) : null;
@@ -1115,10 +1196,10 @@ async function smGrid(uri) {
     );
     if (isControl) return;
     close();
-  }, true);
+  }, sig ? { capture: true, signal: sig } : true);
 
-  window.addEventListener("popstate", () => { if (S.open) close(); });
-  window.addEventListener("hashchange", () => { if (S.open) close(); });
+  window.addEventListener("popstate", () => { if (S.open) close(); }, sig ? { signal: sig } : undefined);
+  window.addEventListener("hashchange", () => { if (S.open) close(); }, sig ? { signal: sig } : undefined);
 
   try { indexedDB.deleteDatabase("sheetmusic"); } catch (e) {} // older versions stored PDFs; scores are streamed now
   const toggle = () => (S.open ? close() : open());
@@ -1150,8 +1231,8 @@ async function smGrid(uri) {
       a.parentNode.insertBefore(b, a);
     } catch (e) { console.warn("[sheetmusic]", e); }
   }
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.open) close(); });
-  setInterval(() => {
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.open) close(); }, sig ? { signal: sig } : undefined);
+  iv1 = setInterval(() => {
     ensureButton();
     hookHistory();
     const curPath = (Spicetify.Platform && Spicetify.Platform.History && Spicetify.Platform.History.location && Spicetify.Platform.History.location.pathname) || location.pathname;
@@ -1162,8 +1243,9 @@ async function smGrid(uri) {
       b.setAttribute("aria-pressed", S.open ? "true" : "false");
     }
   }, 1000);
-  Spicetify.Player.addEventListener("songchange", () => setTimeout(onSong, 150));
+  Spicetify.Player.addEventListener("songchange", () => { if (window.__smSheetMusicLoaded) setTimeout(onSong, 150); });
   hookHistory();
-  setInterval(() => { if (S.open) layout(); }, 1000);
+  iv2 = setInterval(() => { if (S.open) layout(); }, 1000);
   onSong();
+  if (window.__smAutoOpenAfterUpdate) { window.__smAutoOpenAfterUpdate = false; open(); }
 })();
