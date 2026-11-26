@@ -6,67 +6,49 @@
 //   spicetify config extensions sheetmusic.js   and   spicetify apply
 //
 // ============================================================
-// PROVIDER STATUS (verified behaviour inside Spotify desktop):
+// PROVIDER STATUS (verified against live endpoints):
 //
 //  commons    WORKS    — Wikimedia Commons MediaWiki API (origin=* CORS header).
 //                        PDFs served from upload.wikimedia.org, CORS-friendly.
-//                        No disclaimer redirect. Existing code, unchanged.
 //
-//  imslp      WORKS*   — imslp.org/api.php MediaWiki API (origin=* present).
-//                        SEARCH works fine via CosmosAsync fallback.
-//                        PDF downloads from imslp.org are behind a legal
-//                        disclaimer redirect page – the redirect itself is
-//                        CORS-blocked from inside Spotify.  Work-around:
-//                        extract the direct Wikimedia-hosted download URL from
-//                        the page's imageinfo API (imslp stores files on its
-//                        own wiki server, not upload.wikimedia.org) and try a
-//                        direct HEAD first; if that is CORS-blocked we skip the
-//                        file (candidate returned with url = disclaimer page so
-//                        fetchPdf can detect and skip on 'not a PDF').
-//                        In practice IMSLP PDFs ARE accessible – their server
-//                        sends Access-Control-Allow-Origin: * on the raw file
-//                        requests (confirmed with curl from outside Spotify).
-//                        Coverage: classical, choral, solo, chamber.
+//  archive    WORKS    — Internet Archive (archive.org/advancedsearch.php +
+//                        metadata/<id>/files -> archive.org/download/<id>/...).
+//                        Access-Control-Allow-Origin: * on API and PDFs.
+//                        Coverage: classical, ragtime, jazz, vintage pop, choral.
 //
-//  mutopia    WORKS    — Files on GitHub raw (MutopiaProject/MutopiaProject).
-//                        GitHub raw sends CORS headers. We use the GitHub
-//                        Search Code API to find PDFs, then fetch raw URLs.
-//                        Unauthenticated API rate-limit is 10 req/min – fine
-//                        for per-session use.
+//  mutopia    WORKS    — Mutopia Project search (make-table.cgi via CosmosAsync)
+//                        mapped to raw.githubusercontent.com/MutopiaProject/
+//                        MutopiaProject/master/ftp/... (CORS * on PDFs).
+//                        (GitHub /search/code returns 401 without auth.)
 //                        Coverage: classical, baroque, solo guitar, chamber.
 //
-//  cpdl       WORKS*   — ChoralWiki MediaWiki API (origin=* present).
-//                        PDF files are on cpdl.org's own server; some respond
-//                        with CORS headers, some do not.  We try via CosmosAsync
-//                        (Spotify's own HTTP client, bypasses CSP/CORS for
-//                        whitelisted origins) which accepts any HTTPS URL.
-//                        Coverage: choral (vocal scores).
+//  cpdl       WORKS    — ChoralWiki MediaWiki API (origin=*, ACAO=*).
+//                        Resolves File:*.pdf via prop=images -> imageinfo URL
+//                        with CosmosAsync fallback for PDF bytes.
+//                        Coverage: choral / vocal scores.
 //
-//  openScore  SKIP     — MusicXML only (.mxl files on GitHub).
-//                        No MusicXML renderer available inside Spotify without
-//                        loading a large library (Vexflow ~1 MB). Skipped for
-//                        now; re-evaluate in Step 2 if a renderer is added.
-//
-//  classClef  WORKS*   — Classical guitar PDFs on classclef.com.
-//                        Direct PDF fetch tested: classclef.com does NOT send
-//                        Access-Control-Allow-Origin on PDF responses, so
-//                        raw fetch() fails. CosmosAsync (Spotify's own HTTP)
-//                        does not check CORS, so PDFs are accessible that way.
-//                        Tab staves (6 lines) are filtered by smAnalyze so the
-//                        bar reader only counts 5-line music staves.
+//  classclef  WORKS*   — Classical guitar PDFs via classclef.com WordPress
+//                        REST API (wp-json/wp/v2/posts?search=...) via
+//                        CosmosAsync fallback. Tab staves (6 lines) are
+//                        skipped by smAnalyze so only 5-line staves count.
 //                        Coverage: classical guitar.
 //
-//  songsterr  WORKS    — Unofficial JSON API (no CORS block on the JSON
-//                        endpoint). Last-resort only. Candidates are kind:"tab"
-//                        with confidence:"low". Tab data returned but not
-//                        rendered as a highlighted PDF; shown as a fallback
-//                        message with a link. Coverage: pop, rock, metal.
+//  imslp      REMOVED  — MediaWiki API works, but PDF URLs return an HTML
+//                        disclaimer page (text/html, no CORS) instead of %PDF-.
+//
+//  openscore  SKIPPED  — MusicXML (.mxl) only; no client-side MusicXML
+//                        renderer in this single-file extension.
+//
+//  songsterr  REMOVED  — /a/ra/songs.json returns 404; /api/songs returns 403
+//                        ERR_ACCESS_POLICY forbidding automated access.
+//
+//  loc/musopen REMOVED — Both return 403 Cloudflare anti-bot challenge.
 //
 // Expected coverage:
-//   Classical / orchestral : Commons + IMSLP + Mutopia → excellent
-//   Choral / vocal         : CPDL + Commons             → good
-//   Classical guitar       : ClassClef + Mutopia         → good
-//   Pop / rock             : Songsterr (tabs, low conf.) → low
+//   Classical / orchestral : Commons + Archive.org + Mutopia -> strong
+//   Choral / vocal         : CPDL + Commons + Archive.org    -> good
+//   Classical guitar       : ClassClef + Mutopia             -> good
+//   Vintage pop / jazz/rag : Archive.org                     -> moderate
 //   Modern copyrighted pop : reported as "not available"
 // ============================================================
 (async function SheetMusic() {
@@ -327,7 +309,8 @@ function smParse(title, artists) {
   const mvtWords = smNorm(mvtName).split(" ").filter(Boolean);
   const mvtKey = mvtWords.length && mvtWords.some((w) => w.length > 2 && !SM_TEMPO.has(w)) ? mvtName : "";
   const toks = smTokens(core);
-  return { title: t, comp, core, base, nick, mvt, mvtName: mvtKey, toks, words: toks.filter((w) => !/^\d+$/.test(w)), nickToks: nick ? smTokens(nick) : [] };
+  const artist = (people[0] || "").trim();
+  return { title: t, comp, artist, core, base, nick, mvt, mvtName: mvtKey, toks, words: toks.filter((w) => !/^\d+$/.test(w)), nickToks: nick ? smTokens(nick) : [] };
 }
 const smBase = (s) => smParse(s, []).base;
 
@@ -363,15 +346,16 @@ function smMovement(title) {
 // searches to try for a parsed title, best first (Commons needs every word of a query, so there are short ones and exact ones)
 const SM_SPELL = [[/czardas/i, "Csárdás"], [/moonlight/i, "Piano Sonata No. 14 Op. 27"], [/for elise|fur elise|für elise/i, "Für Elise"], [/pathetique|pathétique/i, "Piano Sonata No. 8 Op. 13"], [/canon in d/i, "Canon in D Pachelbel"], [/clair de lune/i, "Clair de lune"], [/gymnop/i, "Gymnopédie"], [/liebestr/i, "Liebesträume"]];
 function smQueries(P) {
-  const { comp, nick, core, mvtName } = P;
+  const { comp, artist, nick, core, mvtName } = P;
   const type = (smNorm(core).match(SM_TYPES) || [])[1];
   const op = (core.match(SM_CATALOG) || [])[0];
   const num = (core.match(/\bN(?:o|r|umber)\.?\s*(\d+)/i) || [])[1];
   const alt = (SM_SPELL.find(([re]) => re.test(core + " " + nick)) || [])[1];
   const q = [];
   const add = (...p) => { const s = p.filter(Boolean).join(" ").replace(/\s+/g, " ").trim(); if (s.length > 2) q.push(s); };
-  if (nick) { add(nick, comp); add(nick); }
+  if (nick) { add(nick, comp || artist); add(nick); }
   add(comp, core);
+  if (!comp && artist) add(core, artist);
   if (type && num) add(comp, type, num);
   if (type && op) add(comp, type, op);
   add(core);
@@ -717,6 +701,31 @@ async function smGrid(uri) {
     }
   }
 
+  async function getText(url) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return await r.text();
+    } catch (e) {
+      const res = await Spicetify.CosmosAsync.get(url);
+      return typeof res === "string" ? res : "";
+    }
+  }
+  // Shared binary fetch with CosmosAsync fallback for PDF servers without CORS headers
+  async function fetchViaCosmos(cand) {
+    try {
+      const r = await fetch(cand.url, { cache: "no-store", signal: AbortSignal.timeout(90000) });
+      if (r.ok) return new Uint8Array(await r.arrayBuffer());
+    } catch (e) {}
+    try {
+      const r = await Spicetify.CosmosAsync.get(cand.url);
+      if (r instanceof Uint8Array) return r;
+      if (r instanceof ArrayBuffer) return new Uint8Array(r);
+      if (typeof r === "string" && r.startsWith("%PDF-")) return Uint8Array.from(r, (c) => c.charCodeAt(0) & 255);
+    } catch (e) {}
+    return null;
+  }
+
   // ---- Provider: Wikimedia Commons ----
   const providerCommons = {
     id: "commons", name: "Wikimedia Commons", genres: ["classical", "choral", "public-domain"],
@@ -755,78 +764,65 @@ async function smGrid(uri) {
     fetch: null,
   };
 
-  // ---- Provider: IMSLP (Petrucci Music Library) ----
-  const providerIMSLP = {
-    id: "imslp", name: "IMSLP", genres: ["classical", "choral", "opera", "chamber"],
+  // ---- Provider: Internet Archive (public-domain sheet music PDFs, CORS *) ----
+  const providerArchive = {
+    id: "archive", name: "Internet Archive", genres: ["classical", "jazz", "ragtime", "pop", "choral", "public-domain"],
     async search(P) {
-      const qs = smQueries(P).slice(0, 4);
+      const qs = smQueries(P).slice(0, 3);
+      const seen = new Set();
       const cands = [];
       for (const q of qs) {
         try {
-          // MediaWiki search over the IMSLP wiki (works are in NS:0)
-          const d = await getJson("https://imslp.org/api.php?" + new URLSearchParams({
-            action: "query", list: "search", srsearch: q, srnamespace: "0", srlimit: "8", format: "json", origin: "*",
+          const d = await getJson("https://archive.org/advancedsearch.php?" + new URLSearchParams({
+            q: `mediatype:texts AND (collection:sheetmusic OR subject:"sheet music" OR title:"sheet music") AND (${q})`,
+            "fl[]": "identifier,title,creator",
+            rows: "6",
+            output: "json",
           }));
-          const pages = (d && d.query && d.query.search) || [];
-          for (const pg of pages) {
-            // Get file links from the work page
+          const docs = (d && d.response && d.response.docs) || [];
+          await Promise.all(docs.slice(0, 4).map(async (doc) => {
+            if (!doc.identifier || seen.has(doc.identifier)) return;
+            const metaText = [doc.title, Array.isArray(doc.creator) ? doc.creator.join(" ") : doc.creator].filter(Boolean).join(" ");
+            if (!smAccept(metaText, P)) return;
+            seen.add(doc.identifier);
             try {
-              const fd = await getJson("https://imslp.org/api.php?" + new URLSearchParams({
-                action: "query", titles: pg.title, prop: "extlinks", ellimit: "20", format: "json", origin: "*",
-              }));
-              const pdata = Object.values((fd && fd.query && fd.query.pages) || {});
-              for (const pd of pdata) {
-                for (const el of (pd.extlinks || [])) {
-                  const href = (el["*"] || el.url || "");
-                  if (!/\.pdf$/i.test(href)) continue;
-                  if (!smAccept(pg.title + " " + (pg.snippet || ""), P)) continue;
-                  const title = pg.title.replace(/^IMSLP\d*:/i, "").trim();
-                  if (!cands.find((c) => c.url === href))
-                    cands.push({ title, url: href, text: pg.title + " " + (pg.snippet || "").replace(/<[^>]+>/g, " "), sourceId: "imslp", kind: "pdf", confidence: "high" });
-                }
-              }
+              const fm = await getJson("https://archive.org/metadata/" + encodeURIComponent(doc.identifier) + "/files");
+              const pdfs = ((fm && fm.result) || []).filter((f) => /\.pdf$/i.test(f.name) && (Number(f.size) || 0) < 30e6);
+              const best = pdfs.find((f) => !/_text\.pdf$/i.test(f.name)) || pdfs[0];
+              if (!best) return;
+              const pdfUrl = "https://archive.org/download/" + encodeURIComponent(doc.identifier) + "/" + encodeURIComponent(best.name);
+              cands.push({ title: doc.title || best.name.replace(/\.pdf$/i, ""), url: pdfUrl, text: metaText, sourceId: "archive", kind: "pdf", confidence: "high" });
             } catch (e2) {}
-          }
+          }));
         } catch (e) {}
       }
       return cands.slice(0, 6);
     },
-    // IMSLP PDFs may need CosmosAsync to bypass CORS on some mirrors
-    async fetch(cand) {
-      try {
-        const r = await fetch(cand.url, { signal: AbortSignal.timeout(90000) });
-        if (r.ok) { const ab = await r.arrayBuffer(); return new Uint8Array(ab); }
-      } catch (e) {}
-      // Fallback: use Spotify's HTTP client (bypasses CORS)
-      try {
-        const r = await Spicetify.CosmosAsync.get(cand.url);
-        if (r) return r instanceof Uint8Array ? r : null;
-      } catch (e) {}
-      return null;
-    },
+    fetch: null,
   };
 
-  // ---- Provider: Mutopia Project (GitHub raw files) ----
+  // ---- Provider: Mutopia Project (make-table search -> GitHub raw PDFs, CORS *) ----
   const providerMutopia = {
     id: "mutopia", name: "Mutopia Project", genres: ["classical", "baroque", "guitar", "chamber"],
     async search(P) {
-      const qs = smQueries(P).slice(0, 3);
+      const qs = smQueries(P).slice(0, 2);
       const cands = [];
       for (const q of qs) {
         try {
-          // GitHub Code Search API – no auth needed for < 10 req/min
-          const d = await getJson("https://api.github.com/search/code?" + new URLSearchParams({
-            q: q + " repo:MutopiaProject/MutopiaProject extension:pdf",
-            per_page: "10",
-          }));
-          for (const item of ((d && d.items) || [])) {
-            const rawUrl = item.html_url
-              .replace("github.com", "raw.githubusercontent.com")
-              .replace("/blob/", "/");
-            const title = item.name.replace(/\.pdf$/i, "");
-            if (!smAccept(title + " " + item.path, P)) continue;
+          const html = await getText("https://www.mutopiaproject.org/cgibin/make-table.cgi?" + new URLSearchParams({ searchingfor: q }));
+          if (!html) continue;
+          const re = /href="(https?:\/\/www\.mutopiaproject\.org\/ftp\/[^"]+-a4\.pdf|[^"]*\/ftp\/[^"]+-a4\.pdf)"/gi;
+          let m;
+          while ((m = re.exec(html)) !== null) {
+            const ftpIdx = m[1].indexOf("/ftp/");
+            if (ftpIdx < 0) continue;
+            const rel = m[1].slice(ftpIdx);
+            const rawUrl = "https://raw.githubusercontent.com/MutopiaProject/MutopiaProject/master" + rel;
+            const title = decodeURIComponent(rel.split("/").pop().replace(/-a4\.pdf$/i, "").replace(/_/g, " "));
+            const text = title + " " + rel.replace(/[/_-]+/g, " ");
+            if (!smAccept(text, P)) continue;
             if (!cands.find((c) => c.url === rawUrl))
-              cands.push({ title, url: rawUrl, text: title + " " + item.path, sourceId: "mutopia", kind: "pdf", confidence: "high" });
+              cands.push({ title, url: rawUrl, text, sourceId: "mutopia", kind: "pdf", confidence: "high" });
           }
         } catch (e) {}
       }
@@ -835,7 +831,7 @@ async function smGrid(uri) {
     fetch: null,
   };
 
-  // ---- Provider: CPDL (ChoralWiki) ----
+  // ---- Provider: CPDL (ChoralWiki, MediaWiki prop=images -> imageinfo) ----
   const providerCPDL = {
     id: "cpdl", name: "CPDL (ChoralWiki)", genres: ["choral", "vocal", "sacred"],
     async search(P) {
@@ -844,23 +840,29 @@ async function smGrid(uri) {
       for (const q of qs) {
         try {
           const d = await getJson("https://www1.cpdl.org/wiki/api.php?" + new URLSearchParams({
-            action: "query", list: "search", srsearch: q, srnamespace: "0", srlimit: "8", format: "json", origin: "*",
+            action: "query", list: "search", srsearch: q, srnamespace: "0", srlimit: "6", format: "json", origin: "*",
           }));
           const pages = (d && d.query && d.query.search) || [];
           for (const pg of pages) {
+            const pgText = pg.title + " " + (pg.snippet || "").replace(/<[^>]+>/g, " ");
+            if (!smAccept(pgText, P)) continue;
             try {
               const fd = await getJson("https://www1.cpdl.org/wiki/api.php?" + new URLSearchParams({
-                action: "query", titles: pg.title, prop: "extlinks", ellimit: "20", format: "json", origin: "*",
+                action: "query", titles: pg.title, prop: "images", imlimit: "15", format: "json", origin: "*",
               }));
-              const pdata = Object.values((fd && fd.query && fd.query.pages) || {});
-              for (const pd of pdata) {
-                for (const el of (pd.extlinks || [])) {
-                  const href = (el["*"] || el.url || "");
-                  if (!/\.pdf$/i.test(href)) continue;
-                  if (!smAccept(pg.title + " " + (pg.snippet || ""), P)) continue;
-                  if (!cands.find((c) => c.url === href))
-                    cands.push({ title: pg.title, url: href, text: pg.title + " " + (pg.snippet || "").replace(/<[^>]+>/g, " "), sourceId: "cpdl", kind: "pdf", confidence: "high" });
-                }
+              const pdfTitles = Object.values((fd && fd.query && fd.query.pages) || {})
+                .flatMap((pd) => (pd.images || []).map((im) => im.title))
+                .filter((t) => /\.pdf$/i.test(t))
+                .slice(0, 4);
+              if (!pdfTitles.length) continue;
+              const ii = await getJson("https://www1.cpdl.org/wiki/api.php?" + new URLSearchParams({
+                action: "query", titles: pdfTitles.join("|"), prop: "imageinfo", iiprop: "url|size", format: "json", origin: "*",
+              }));
+              for (const pd of Object.values((ii && ii.query && ii.query.pages) || {})) {
+                const info = pd.imageinfo && pd.imageinfo[0];
+                if (!info || !info.url || (info.size || 0) > 30e6) continue;
+                if (!cands.find((c) => c.url === info.url))
+                  cands.push({ title: pg.title, url: info.url, text: pgText + " " + (pd.title || ""), sourceId: "cpdl", kind: "pdf", confidence: "high" });
               }
             } catch (e2) {}
           }
@@ -868,93 +870,44 @@ async function smGrid(uri) {
       }
       return cands.slice(0, 6);
     },
-    // CPDL PDFs may not have CORS headers – use CosmosAsync fallback
-    async fetch(cand) {
-      try {
-        const r = await fetch(cand.url, { signal: AbortSignal.timeout(90000) });
-        if (r.ok) { const ab = await r.arrayBuffer(); return new Uint8Array(ab); }
-      } catch (e) {}
-      try {
-        const r = await Spicetify.CosmosAsync.get(cand.url);
-        if (r) return r instanceof Uint8Array ? r : null;
-      } catch (e) {}
-      return null;
-    },
+    fetch: fetchViaCosmos,
   };
 
-  // ---- Provider: ClassClef (classical guitar PDFs) ----
+  // ---- Provider: ClassClef (classical guitar PDFs via WordPress REST API) ----
   const providerClassClef = {
     id: "classclef", name: "ClassClef", genres: ["guitar", "classical"],
     async search(P) {
-      // ClassClef doesn't have a formal API; we use their Google-site-search–style URL.
-      // The search results are HTML, so we use a simple text fetch and parse href attributes.
       const qs = smQueries(P).slice(0, 2);
       const cands = [];
       for (const q of qs) {
         try {
-          // ClassClef search endpoint (returns HTML)
-          const url = "https://www.classclef.com/?s=" + encodeURIComponent(q);
-          let html = "";
-          try { html = await (await fetch(url, { signal: AbortSignal.timeout(10000) })).text(); } catch (e) {
-            try { html = await Spicetify.CosmosAsync.get(url); } catch (e2) {}
-          }
-          if (!html) continue;
-          // Extract PDF links from the HTML
-          const re = /href="(https?:\/\/www\.classclef\.com\/[^"]+\.pdf)"/gi;
-          let m;
-          while ((m = re.exec(html)) !== null) {
-            const pdfUrl = m[1];
-            const title = decodeURIComponent(pdfUrl.split("/").pop().replace(/\.pdf$/i, "").replace(/-/g, " "));
-            if (!smAccept(title + " " + q, P)) continue;
-            if (!cands.find((c) => c.url === pdfUrl))
-              cands.push({ title, url: pdfUrl, text: title + " guitar", sourceId: "classclef", kind: "pdf", confidence: "high" });
+          const posts = await getJson("https://www.classclef.com/wp-json/wp/v2/posts?" + new URLSearchParams({
+            search: q, per_page: "5",
+          }));
+          if (!Array.isArray(posts)) continue;
+          for (const post of posts) {
+            const postTitle = ((post.title && post.title.rendered) || "").replace(/<[^>]+>/g, " ").trim();
+            const body = (post.content && post.content.rendered) || "";
+            const re = /href="(https?:\/\/[^"]+\.pdf)"/gi;
+            let m;
+            while ((m = re.exec(body)) !== null) {
+              const pdfUrl = m[1].replace(/^http:\/\//i, "https://");
+              const fileTitle = decodeURIComponent(pdfUrl.split("/").pop().replace(/\.pdf$/i, "").replace(/[-_]+/g, " "));
+              const text = postTitle + " " + fileTitle + " guitar";
+              if (!smAccept(text, P)) continue;
+              if (!cands.find((c) => c.url === pdfUrl))
+                cands.push({ title: postTitle || fileTitle, url: pdfUrl, text, sourceId: "classclef", kind: "pdf", confidence: "high" });
+            }
           }
         } catch (e) {}
       }
       return cands.slice(0, 4);
     },
-    // ClassClef PDFs need CosmosAsync (no CORS headers on the PDF server)
-    async fetch(cand) {
-      try {
-        const r = await fetch(cand.url, { signal: AbortSignal.timeout(90000) });
-        if (r.ok) { const ab = await r.arrayBuffer(); return new Uint8Array(ab); }
-      } catch (e) {}
-      try {
-        const r = await Spicetify.CosmosAsync.get(cand.url);
-        if (r) return r instanceof Uint8Array ? r : null;
-      } catch (e) {}
-      return null;
-    },
+    fetch: fetchViaCosmos,
   };
 
-  // ---- Provider: Songsterr (last-resort tabs, unofficial API) ----
-  const providerSongsterr = {
-    id: "songsterr", name: "Songsterr", genres: ["pop", "rock", "metal", "guitar"],
-    async search(P) {
-      const q = [P.comp, P.core].filter(Boolean).join(" ") || P.title;
-      if (!q) return [];
-      try {
-        const d = await getJson("https://www.songsterr.com/a/ra/songs.json?pattern=" + encodeURIComponent(q));
-        if (!Array.isArray(d)) return [];
-        return d.slice(0, 5).filter((item) => {
-          const text = (item.title || "") + " " + (item.artist && item.artist.name || "");
-          return smAccept(text, P);
-        }).map((item) => ({
-          title: (item.title || "Unknown"),
-          url: "https://www.songsterr.com/a/wsa/" + encodeURIComponent((item.title || "").toLowerCase().replace(/\s+/g, "-")) + "-tab-s" + item.id + "t0",
-          text: (item.title || "") + " " + (item.artist && item.artist.name || ""),
-          sourceId: "songsterr",
-          kind: "tab",
-          confidence: "low",
-          songsterrId: item.id,
-        }));
-      } catch (e) { return []; }
-    },
-    fetch: null, // tabs are not fetched as PDFs
-  };
-
-  // All providers in priority order (Songsterr is always last)
-  const SM_PROVIDERS = [providerCommons, providerIMSLP, providerMutopia, providerCPDL, providerClassClef, providerSongsterr];
+  // All verified working providers
+  const SM_PROVIDERS = [providerCommons, providerArchive, providerMutopia, providerCPDL, providerClassClef];
 
   // ---- Unified search: run all providers in parallel, merge & score results ----
   async function findScores(track) {
